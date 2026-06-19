@@ -1,6 +1,6 @@
 import request from "supertest";
 import express from "express";
-import router from "../src/routes/jobs";
+import router from "../src/routes/jobs.js";
 
 // Create a test app
 const app = express();

@@ -76,7 +76,7 @@ router.get("/:contractId", async (req: Request, res: Response) => {
       .build();
 
     const result = await server.simulateTransaction(tx);
-    const job = parseJobFromResult(result, contractId);
+    const job = parseJobFromResult(result, contractId as string);
 
     res.json({ success: true, data: job });
   } catch (err: any) {
