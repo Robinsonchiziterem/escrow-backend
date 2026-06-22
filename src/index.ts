@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import jobRoutes from "./routes/jobs.js";
+import { initSchema } from "./indexer/db.js";
+import { startPoller } from "./indexer/poller.js";
 
 dotenv.config();
 
@@ -17,6 +19,10 @@ app.get("/health", (req, res) => {
 });
 
 app.use("/api/jobs", jobRoutes);
+
+// Initialize indexer schema and start polling
+initSchema();
+startPoller();
 
 app.listen(PORT, () => {
   console.log(`Escrow backend running on port ${PORT}`);
