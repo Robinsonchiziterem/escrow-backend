@@ -143,11 +143,11 @@ router.post("/build-tx", async (req: Request, res: Response) => {
       // Check that args has admin and token
       const adminArg = args.find((a: any) => a.type === "address" && a.value);
       const tokenArg = args.find((a: any) => a.type === "address" && a.value && a !== adminArg);
-      
+
       if (!adminArg || !tokenArg) {
-        return res.status(400).json({ 
-          success: false, 
-          error: "Both admin (address) and token (address) arguments are required for whitelist management methods" 
+        return res.status(400).json({
+          success: false,
+          error: "Both admin (address) and token (address) arguments are required for whitelist management methods"
         });
       }
     }
@@ -175,6 +175,40 @@ router.post("/build-tx", async (req: Request, res: Response) => {
       networkPassphrase: Networks.TESTNET,
     })
       .addOperation(contract.call(method, ...scArgs))
+      .setTimeout(30)
+      .build();
+
+    const prepared = await server.prepareTransaction(tx);
+    res.json({ success: true, xdr: prepared.toXDR() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/jobs/:contractId/milestones/:index/partial-release
+router.post("/:contractId/milestones/:index/partial-release", async (req: Request, res: Response) => {
+  try {
+    const { contractId, index } = req.params;
+    const { amount, sourceAddress } = req.body;
+    const contract = new Contract(contractId as string);
+    const account = await server.getAccount(sourceAddress as string);
+
+    // Validate amount is a positive integer
+    const amountNum = BigInt(amount);
+    if (amountNum <= 0) {
+      return res.status(400).json({ success: false, error: "Amount must be a positive integer" });
+    }
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(contract.call(
+        "approve_partial",
+        Address.fromString(sourceAddress).toScVal(),
+        nativeToScVal(parseInt(index as string), { type: "u32" }),
+        nativeToScVal(amountNum, { type: "i128" })
+      ))
       .setTimeout(30)
       .build();
 
