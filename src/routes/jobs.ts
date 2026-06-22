@@ -250,6 +250,33 @@ router.get("/:contractId/milestones/:index/time-remaining", async (req: Request,
   }
 });
 
+// POST /api/jobs/:contractId/milestones/:index/claim-auto-release
+router.post("/:contractId/milestones/:index/claim-auto-release", async (req: Request, res: Response) => {
+  try {
+    const { contractId, index } = req.params;
+    const { sourceAddress } = req.body;
+    const contract = new Contract(contractId as string);
+    const account = await server.getAccount(sourceAddress as string);
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(contract.call(
+        "claim_auto_release",
+        Address.fromString(sourceAddress).toScVal(),
+        nativeToScVal(parseInt(index as string), { type: "u32" })
+      ))
+      .setTimeout(30)
+      .build();
+
+    const prepared = await server.prepareTransaction(tx);
+    res.json({ success: true, xdr: prepared.toXDR() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/jobs/submit - submit a signed transaction
 router.post("/submit", async (req: Request, res: Response) => {
   try {
