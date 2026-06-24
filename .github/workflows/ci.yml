@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "fix/**"]
   pull_request:
     branches: [main]
 
@@ -26,3 +26,6 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Test
+        run: npm test
