@@ -14,6 +14,8 @@ import {
   jobContractCors,
   jobContractSecurityHeaders,
 } from "../middleware/job-contract-security.js";
+import { sendError, sendSuccess } from "../utils/api-response.js";
+import { isValidStellarContractId } from "../utils/stellar.js";
 
 const router = Router();
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
@@ -76,6 +78,26 @@ router.get(
   jobContractCors,
   jobContractSecurityHeaders,
   async (req: Request, res: Response) => {
+  const { contractId } = req.params;
+
+  if (!isValidStellarContractId(contractId as string)) {
+    sendError(
+      res,
+      400,
+      "contractId must be a valid Stellar contract address (C...)"
+    );
+    return;
+  }
+
+  const requiredApiKey = process.env.API_KEY;
+  if (requiredApiKey) {
+    const providedKey = req.header("x-api-key");
+    if (providedKey !== requiredApiKey) {
+      sendError(res, 401, "Unauthorized");
+      return;
+    }
+  }
+
   try {
     const contract = new Contract(contractId as string);
     const account = await server.getAccount(process.env.DEPLOYER_ADDRESS || "");
