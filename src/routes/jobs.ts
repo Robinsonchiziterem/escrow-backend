@@ -77,7 +77,6 @@ router.get(
   jobContractSecurityHeaders,
   async (req: Request, res: Response) => {
   try {
-    const { contractId } = req.params;
     const contract = new Contract(contractId as string);
     const account = await server.getAccount(process.env.DEPLOYER_ADDRESS || "");
     const tx = new TransactionBuilder(account, {
@@ -89,11 +88,38 @@ router.get(
       .build();
 
     const result = await server.simulateTransaction(tx);
-    const job = parseJobFromResult(result, contractId as string);
 
-    res.json({ success: true, data: job });
+    if ("error" in result) {
+      const errorMsg = String(result.error);
+      if (
+        /not found|NotFound|contract not found/i.test(errorMsg) ||
+        /contract error #1\b/i.test(errorMsg)
+      ) {
+        sendError(res, 404, "Job not found");
+        return;
+      }
+      sendError(res, 500, errorMsg);
+      return;
+    }
+
+    const job = parseJobFromResult(result, contractId as string);
+    if (!job) {
+      sendError(res, 404, "Job not found");
+      return;
+    }
+
+    sendSuccess(res, job);
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    const message = err?.message ?? "Internal server error";
+    if (/unauthorized|authentication|401/i.test(message)) {
+      sendError(res, 401, "Unauthorized");
+      return;
+    }
+    if (/not found|404/i.test(message)) {
+      sendError(res, 404, "Job not found");
+      return;
+    }
+    sendError(res, 500, message);
   }
   }
 );
