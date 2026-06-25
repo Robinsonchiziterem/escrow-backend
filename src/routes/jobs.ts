@@ -10,7 +10,10 @@ import {
 } from "@stellar/stellar-sdk";
 import { Server } from "@stellar/stellar-sdk/rpc";
 import { getJobsByWallet } from "../indexer/db.js";
-import { jobContractRateLimit } from "../middleware/job-contract-rate-limit.js";
+import {
+  jobContractRateLimit,
+  jobWhitelistRateLimit,
+} from "../middleware/job-contract-rate-limit.js";
 import {
   jobContractCors,
   jobContractSecurityHeaders,
@@ -150,51 +153,94 @@ router.get(
 );
 
 // GET /api/jobs/:contractId/whitelist - get whitelisted tokens
-router.get("/:contractId/whitelist", async (req: Request, res: Response) => {
-  try {
+router.get(
+  "/:contractId/whitelist",
+  jobContractCors,
+  jobContractSecurityHeaders,
+  jobWhitelistRateLimit,
+  async (req: Request, res: Response) => {
     const { contractId } = req.params;
-    const contract = new Contract(contractId as string);
-    const account = await server.getAccount(process.env.DEPLOYER_ADDRESS || "");
-    const tx = new TransactionBuilder(account, {
-      fee: BASE_FEE,
-      networkPassphrase: Networks.TESTNET,
-    })
-      .addOperation(contract.call("get_whitelisted_tokens"))
-      .setTimeout(30)
-      .build();
 
-    const result = await server.simulateTransaction(tx);
-
-    // Check if simulation resulted in an error
-    if ("error" in result) {
-      // Check if it's the NotInitialized error (Error::NotInitialized = 2)
-      // The error from simulation will have a message indicating contract error #2
-      const errorMsg = result.error as string;
-      if (errorMsg.includes("contract error #2") || errorMsg.includes("NotInitialized")) {
-        // Return empty tokens array for uninitialized contracts
-        res.json({ success: true, tokens: [] });
-      } else {
-        res.status(500).json({ success: false, error: errorMsg });
-      }
-    } else if ("result" in result && result.result?.retval) {
-      // Handle Vec<Address> correctly by iterating (using type assertions)
-      const tokens: string[] = [];
-      const vec = result.result.retval as any;
-
-      // Since it's a Vec from the contract, it should have a map/forEach method
-      // like val.milestones() in parseJobFromResult
-      if (typeof vec.forEach === "function") {
-        vec.forEach((token: any) => tokens.push(token.toString()));
-      }
-      res.json({ success: true, tokens });
-    } else {
-      res.status(500).json({ success: false, error: "Failed to get whitelisted tokens" });
+    if (!isValidStellarContractId(contractId as string)) {
+      sendError(
+        res,
+        400,
+        "contractId must be a valid Stellar contract address (C...)"
+      );
+      return;
     }
-  } catch (err: any) {
-    console.error("Error in whitelist endpoint:", err);
-    res.status(500).json({ success: false, error: err.message });
+
+    const requiredApiKey = process.env.API_KEY;
+    if (requiredApiKey) {
+      const providedKey = req.header("x-api-key");
+      if (providedKey !== requiredApiKey) {
+        sendError(res, 401, "Unauthorized");
+        return;
+      }
+    }
+
+    try {
+      const contract = new Contract(contractId as string);
+      const account = await server.getAccount(process.env.DEPLOYER_ADDRESS || "");
+      const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(contract.call("get_whitelisted_tokens"))
+        .setTimeout(30)
+        .build();
+
+      const result = await server.simulateTransaction(tx);
+
+      // Check if simulation resulted in an error
+      if ("error" in result) {
+        // Check if it's the NotInitialized error (Error::NotInitialized = 2)
+        // The error from simulation will have a message indicating contract error #2
+        const errorMsg = String(result.error);
+        if (errorMsg.includes("contract error #2") || errorMsg.includes("NotInitialized")) {
+          // Return empty tokens array for uninitialized contracts
+          sendSuccess(res, { tokens: [] });
+          return;
+        }
+        if (
+          /not found|NotFound|contract not found/i.test(errorMsg) ||
+          /contract error #1\b/i.test(errorMsg)
+        ) {
+          sendError(res, 404, "Job not found");
+          return;
+        }
+        sendError(res, 500, errorMsg);
+        return;
+      }
+
+      if ("result" in result && result.result?.retval) {
+        // Handle Vec<Address> correctly by iterating (using type assertions)
+        const tokens: string[] = [];
+        const vec = result.result.retval as any;
+
+        // Since it's a Vec from the contract, it should have a map/forEach method
+        // like val.milestones() in parseJobFromResult
+        if (typeof vec.forEach === "function") {
+          vec.forEach((token: any) => tokens.push(token.toString()));
+        }
+        sendSuccess(res, { tokens });
+      } else {
+        sendError(res, 500, "Failed to get whitelisted tokens");
+      }
+    } catch (err: any) {
+      const message = err?.message ?? "Internal server error";
+      if (/unauthorized|authentication|401/i.test(message)) {
+        sendError(res, 401, "Unauthorized");
+        return;
+      }
+      if (/not found|404/i.test(message)) {
+        sendError(res, 404, "Job not found");
+        return;
+      }
+      sendError(res, 500, message);
+    }
   }
-});
+);
 
 // POST /api/jobs/build-tx - build an unsigned transaction for the frontend to sign
 router.post("/build-tx", strictLimiter, async (req: Request, res: Response) => {
