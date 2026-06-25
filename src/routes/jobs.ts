@@ -149,9 +149,17 @@ router.get(
 );
 
 // GET /api/jobs/:contractId/whitelist - get whitelisted tokens
-router.get("/:contractId/whitelist", async (req: Request, res: Response) => {
+router.get("/:contractId/whitelist", jobContractCors, jobContractSecurityHeaders, async (req: Request, res: Response) => {
   try {
     const { contractId } = req.params;
+    if (!isValidStellarContractId(contractId as string)) {
+      sendError(
+        res,
+        400,
+        "contractId must be a valid Stellar contract address (C...)"
+      );
+      return;
+    }
     const contract = new Contract(contractId as string);
     const account = await server.getAccount(process.env.DEPLOYER_ADDRESS || "");
     const tx = new TransactionBuilder(account, {
