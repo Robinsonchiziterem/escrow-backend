@@ -16,7 +16,7 @@ import {
   jobContractSecurityHeaders,
 } from "../middleware/job-contract-security.js";
 import { sendError, sendSuccess } from "../utils/api-response.js";
-import { isValidStellarContractId } from "../utils/stellar.js";
+import { validateContractId } from "../utils/validation.js";
 import { strictLimiter } from "../middleware/rateLimiter.js";
 
 const router = Router();
