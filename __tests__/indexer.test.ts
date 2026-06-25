@@ -24,6 +24,7 @@ describe("Indexer Database", () => {
   beforeEach(() => {
     testDb.exec("DROP TABLE IF EXISTS events");
     testDb.exec("DROP TABLE IF EXISTS indexer_state");
+    testDb.exec("DROP TABLE IF EXISTS webhook_subscriptions");
     initSchema();
   });
 

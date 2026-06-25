@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import jobRoutes from "./routes/jobs.js";
+import webhookRoutes from "./routes/webhooks.js";
 import { initSchema } from "./indexer/db.js";
 import { startPoller } from "./indexer/poller.js";
 
@@ -19,6 +20,7 @@ app.get("/health", (req, res) => {
 });
 
 app.use("/api/jobs", jobRoutes);
+app.use("/api/webhooks", webhookRoutes);
 
 // Initialize indexer schema and start polling
 initSchema();

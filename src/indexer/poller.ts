@@ -1,11 +1,13 @@
 import { Server } from "@stellar/stellar-sdk/rpc";
 import { scValToNative } from "@stellar/stellar-sdk";
 import { getLastIndexedLedger, setLastIndexedLedger, insertEvent } from "./db.js";
+import { buildMilestoneWebhookPayload } from "../webhooks/milestone-events.js";
+import { dispatchMilestoneWebhook } from "../webhooks/dispatcher.js";
 
 const RPC_URL = "https://soroban-testnet.stellar.org";
 const server = new Server(RPC_URL);
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
-const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || "15000", 10);
+const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || "30000", 10);
 
 const EVENT_TYPES = [
   "initialized",
@@ -53,14 +55,28 @@ export async function pollEvents() {
       const timestamp = event.ledgerClosedAt
         ? Math.floor(new Date(event.ledgerClosedAt).getTime() / 1000)
         : Math.floor(Date.now() / 1000);
-      const dataJson = JSON.stringify(event.value);
-      insertEvent(
-        CONTRACT_ID,
+      const dataNative = scValToNative(event.value);
+      const dataJson = JSON.stringify(dataNative);
+      const contractId = event.contractId?.toString() || CONTRACT_ID;
+      const inserted = insertEvent(
+        contractId,
         eventType,
         ledgerSequence,
         timestamp,
         dataJson
       );
+
+      if (inserted) {
+        const payload = buildMilestoneWebhookPayload(
+          contractId,
+          eventType,
+          dataNative,
+          event.txHash
+        );
+        if (payload) {
+          dispatchMilestoneWebhook(payload);
+        }
+      }
     }
 
     setLastIndexedLedger(currentLedger);
