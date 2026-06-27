@@ -135,7 +135,7 @@ router.get(
         return;
       }
       logger.error("Failed to fetch job", { contractId, error: errorMsg });
-      sendError(res, 500, errorMsg);
+      sendError(res, 500, "Internal server error");
       return;
     }
 
@@ -161,7 +161,7 @@ router.get(
       return;
     }
     logger.error("Failed to fetch job", { contractId, error: message });
-    sendError(res, 500, message);
+    sendError(res, 500, "Internal server error");
   }
   }
 );
