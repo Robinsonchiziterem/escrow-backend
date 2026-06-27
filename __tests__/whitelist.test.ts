@@ -9,6 +9,18 @@ const VALID_CONTRACT =
 const mockGetAccount = jest.fn<() => Promise<unknown>>();
 const mockSimulateTransaction = jest.fn<() => Promise<unknown>>();
 
+const mockLoggerInfo = jest.fn();
+const mockLoggerWarn = jest.fn();
+const mockLoggerError = jest.fn();
+
+jest.unstable_mockModule("../src/utils/logger.js", () => ({
+  default: {
+    info: mockLoggerInfo,
+    warn: mockLoggerWarn,
+    error: mockLoggerError,
+  },
+}));
+
 jest.unstable_mockModule("@stellar/stellar-sdk/rpc", () => ({
   Server: class MockServer {
     getAccount = mockGetAccount;
@@ -34,6 +46,9 @@ describe("GET /api/jobs/:contractId/whitelist", () => {
   beforeEach(() => {
     mockGetAccount.mockReset();
     mockSimulateTransaction.mockReset();
+    mockLoggerInfo.mockReset();
+    mockLoggerWarn.mockReset();
+    mockLoggerError.mockReset();
     resetJobWhitelistRateLimitBuckets();
 
     delete process.env.API_KEY;
@@ -259,6 +274,154 @@ describe("GET /api/jobs/:contractId/whitelist", () => {
         error: "Too many requests, please try again later",
       });
       expect(res.headers["x-ratelimit-remaining"]).toBe("0");
+    });
+  });
+
+  // --- ISSUE #30: Winston Logger Traces ---
+  describe("Winston Logger Traces (Issue #30)", () => {
+    it("logs info with contractId at the start of every request", async () => {
+      const vec = { forEach: () => {} };
+      mockSimulateTransaction.mockResolvedValue({ result: { retval: vec } });
+
+      await request(buildApp()).get(`/api/jobs/${VALID_CONTRACT}/whitelist`);
+
+      expect(mockLoggerInfo).toHaveBeenCalledWith("Fetching whitelisted tokens", {
+        contractId: VALID_CONTRACT,
+      });
+    });
+
+    it("logs warn with contractId when contractId is invalid", async () => {
+      await request(buildApp())
+        .get("/api/jobs/not-a-valid-contract/whitelist")
+        .expect(400);
+
+      expect(mockLoggerInfo).toHaveBeenCalledWith("Fetching whitelisted tokens", {
+        contractId: "not-a-valid-contract",
+      });
+      expect(mockLoggerWarn).toHaveBeenCalledWith("Invalid contractId provided", {
+        contractId: "not-a-valid-contract",
+      });
+    });
+
+    it("logs warn with contractId when request is unauthorized", async () => {
+      process.env.API_KEY = "secret-key";
+
+      await request(buildApp())
+        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
+        .expect(401);
+
+      expect(mockLoggerWarn).toHaveBeenCalledWith("Unauthorized request", {
+        contractId: VALID_CONTRACT,
+      });
+    });
+
+    it("logs warn when the contract/job is not found (contract error #1)", async () => {
+      mockSimulateTransaction.mockResolvedValue({
+        error: "contract not found on network",
+      });
+
+      await request(buildApp())
+        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
+        .expect(404);
+
+      expect(mockLoggerWarn).toHaveBeenCalledWith("Job not found", {
+        contractId: VALID_CONTRACT,
+      });
+    });
+
+    it("logs info with tokenCount: 0 for uninitialized contract (contract error #2)", async () => {
+      mockSimulateTransaction.mockResolvedValue({
+        error: "contract error #2",
+      });
+
+      await request(buildApp())
+        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
+        .expect(200);
+
+      expect(mockLoggerInfo).toHaveBeenCalledWith(
+        "Whitelisted tokens fetched successfully",
+        { contractId: VALID_CONTRACT, tokenCount: 0 }
+      );
+    });
+
+    it("logs error with contractId and error message on simulation failure", async () => {
+      mockSimulateTransaction.mockResolvedValue({
+        error: "host unreachable",
+      });
+
+      await request(buildApp())
+        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
+        .expect(500);
+
+      expect(mockLoggerError).toHaveBeenCalledWith(
+        "Failed to fetch whitelisted tokens",
+        { contractId: VALID_CONTRACT, error: "host unreachable" }
+      );
+    });
+
+    it("logs info with contractId and tokenCount on successful token fetch", async () => {
+      const vec = {
+        forEach: (fn: (item: unknown) => void) => {
+          ["TOKEN_A", "TOKEN_B", "TOKEN_C"].forEach(fn);
+        },
+      };
+      mockSimulateTransaction.mockResolvedValue({ result: { retval: vec } });
+
+      await request(buildApp())
+        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
+        .expect(200);
+
+      expect(mockLoggerInfo).toHaveBeenCalledWith(
+        "Whitelisted tokens fetched successfully",
+        { contractId: VALID_CONTRACT, tokenCount: 3 }
+      );
+    });
+
+    it("logs error with contractId when retval is missing from result", async () => {
+      mockSimulateTransaction.mockResolvedValue({ result: {} });
+
+      await request(buildApp())
+        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
+        .expect(500);
+
+      expect(mockLoggerError).toHaveBeenCalledWith(
+        "Failed to fetch whitelisted tokens",
+        { contractId: VALID_CONTRACT, error: "Failed to get whitelisted tokens" }
+      );
+    });
+
+    it("logs error with contractId and error message when an exception is thrown", async () => {
+      mockSimulateTransaction.mockRejectedValue(new Error("Network exploded"));
+
+      await request(buildApp())
+        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
+        .expect(500);
+
+      expect(mockLoggerError).toHaveBeenCalledWith(
+        "Failed to fetch whitelisted tokens",
+        { contractId: VALID_CONTRACT, error: "Network exploded" }
+      );
+    });
+
+    it("log entries contain contractId in JSON-serializable format", async () => {
+      const vec = {
+        forEach: (fn: (item: unknown) => void) => {
+          ["TOKEN_X"].forEach(fn);
+        },
+      };
+      mockSimulateTransaction.mockResolvedValue({ result: { retval: vec } });
+
+      await request(buildApp())
+        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
+        .expect(200);
+
+      const infoCalls = mockLoggerInfo.mock.calls as Array<[string, Record<string, unknown>]>;
+      const successCall = infoCalls.find(([msg]) => msg === "Whitelisted tokens fetched successfully");
+      expect(successCall).toBeDefined();
+      const [, meta] = successCall!;
+      expect(JSON.stringify(meta)).toBe(
+        JSON.stringify({ contractId: VALID_CONTRACT, tokenCount: 1 })
+      );
     });
   });
 });
