@@ -189,7 +189,7 @@ describe("GET /api/jobs/:contractId/whitelist", () => {
         .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
         .expect(500);
 
-      expect(res.body).toEqual({ success: false, error: "host unreachable" });
+      expect(res.body).toEqual({ success: false, error: "Internal server error" });
     });
   });
 
@@ -277,151 +277,102 @@ describe("GET /api/jobs/:contractId/whitelist", () => {
     });
   });
 
-  // --- ISSUE #30: Winston Logger Traces ---
-  describe("Winston Logger Traces (Issue #30)", () => {
-    it("logs info with contractId at the start of every request", async () => {
-      const vec = { forEach: () => {} };
-      mockSimulateTransaction.mockResolvedValue({ result: { retval: vec } });
-
-      await request(buildApp()).get(`/api/jobs/${VALID_CONTRACT}/whitelist`);
-
-      expect(mockLoggerInfo).toHaveBeenCalledWith("Fetching whitelisted tokens", {
-        contractId: VALID_CONTRACT,
+  // --- ISSUE #33: Robust try-catch wrapper ---
+  describe("Robust try-catch wrapper (Issue #33)", () => {
+    it("returns generic 500 without leaking the raw RPC error string", async () => {
+      mockSimulateTransaction.mockResolvedValue({
+        error: "soroban rpc internal: secret host detail at 10.0.0.1",
       });
+
+      const res = await request(buildApp())
+        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
+        .expect(500);
+
+      expect(res.body).toEqual({ success: false, error: "Internal server error" });
+      expect(JSON.stringify(res.body)).not.toContain("10.0.0.1");
+      expect(JSON.stringify(res.body)).not.toContain("soroban rpc internal");
     });
 
-    it("logs warn with contractId when contractId is invalid", async () => {
-      await request(buildApp())
-        .get("/api/jobs/not-a-valid-contract/whitelist")
-        .expect(400);
+    it("returns generic 500 without leaking the thrown exception message", async () => {
+      mockSimulateTransaction.mockRejectedValue(
+        new Error("DB connection string: postgres://admin:password@localhost/prod")
+      );
 
-      expect(mockLoggerInfo).toHaveBeenCalledWith("Fetching whitelisted tokens", {
-        contractId: "not-a-valid-contract",
-      });
-      expect(mockLoggerWarn).toHaveBeenCalledWith("Invalid contractId provided", {
-        contractId: "not-a-valid-contract",
-      });
+      const res = await request(buildApp())
+        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
+        .expect(500);
+
+      expect(res.body).toEqual({ success: false, error: "Internal server error" });
+      expect(JSON.stringify(res.body)).not.toContain("postgres://");
+      expect(JSON.stringify(res.body)).not.toContain("password");
     });
 
-    it("logs warn with contractId when request is unauthorized", async () => {
-      process.env.API_KEY = "secret-key";
+    it("does not include stack trace markers in the 500 response body", async () => {
+      const errWithStack = new Error("some internal failure");
+      mockSimulateTransaction.mockRejectedValue(errWithStack);
 
-      await request(buildApp())
+      const res = await request(buildApp())
+        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
+        .expect(500);
+
+      const body = JSON.stringify(res.body);
+      expect(body).not.toMatch(/at Object\./);
+      expect(body).not.toMatch(/\s+at\s+\w/);
+      expect(body).not.toContain(".ts:");
+      expect(body).not.toContain(".js:");
+    });
+
+    it("returns generic 500 when retval is missing from a successful simulation", async () => {
+      mockSimulateTransaction.mockResolvedValue({ result: {} });
+
+      const res = await request(buildApp())
+        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
+        .expect(500);
+
+      expect(res.body).toEqual({ success: false, error: "Internal server error" });
+    });
+
+    it("catches errors thrown before the RPC call and returns clean 500", async () => {
+      mockGetAccount.mockRejectedValue(new Error("account fetch failed: internal token expired"));
+
+      const res = await request(buildApp())
+        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
+        .expect(500);
+
+      expect(res.body).toEqual({ success: false, error: "Internal server error" });
+      expect(JSON.stringify(res.body)).not.toContain("account fetch failed");
+    });
+
+    it("still returns 401 for auth errors thrown during RPC (not swallowed by outer catch)", async () => {
+      mockSimulateTransaction.mockRejectedValue(new Error("unauthorized: invalid authentication"));
+
+      const res = await request(buildApp())
         .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
         .expect(401);
 
-      expect(mockLoggerWarn).toHaveBeenCalledWith("Unauthorized request", {
-        contractId: VALID_CONTRACT,
-      });
+      expect(res.body).toEqual({ success: false, error: "Unauthorized" });
     });
 
-    it("logs warn when the contract/job is not found (contract error #1)", async () => {
-      mockSimulateTransaction.mockResolvedValue({
-        error: "contract not found on network",
-      });
+    it("still returns 404 for not-found errors thrown during RPC (not swallowed by outer catch)", async () => {
+      mockSimulateTransaction.mockRejectedValue(new Error("contract not found on chain"));
 
-      await request(buildApp())
+      const res = await request(buildApp())
         .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
         .expect(404);
 
-      expect(mockLoggerWarn).toHaveBeenCalledWith("Job not found", {
-        contractId: VALID_CONTRACT,
-      });
+      expect(res.body).toEqual({ success: false, error: "Job not found" });
     });
 
-    it("logs info with tokenCount: 0 for uninitialized contract (contract error #2)", async () => {
-      mockSimulateTransaction.mockResolvedValue({
-        error: "contract error #2",
-      });
+    it("response body contains only success flag and error string — no stack or extra fields", async () => {
+      mockSimulateTransaction.mockRejectedValue(new Error("unexpected"));
 
-      await request(buildApp())
-        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
-        .expect(200);
-
-      expect(mockLoggerInfo).toHaveBeenCalledWith(
-        "Whitelisted tokens fetched successfully",
-        { contractId: VALID_CONTRACT, tokenCount: 0 }
-      );
-    });
-
-    it("logs error with contractId and error message on simulation failure", async () => {
-      mockSimulateTransaction.mockResolvedValue({
-        error: "host unreachable",
-      });
-
-      await request(buildApp())
+      const res = await request(buildApp())
         .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
         .expect(500);
 
-      expect(mockLoggerError).toHaveBeenCalledWith(
-        "Failed to fetch whitelisted tokens",
-        { contractId: VALID_CONTRACT, error: "host unreachable" }
-      );
-    });
-
-    it("logs info with contractId and tokenCount on successful token fetch", async () => {
-      const vec = {
-        forEach: (fn: (item: unknown) => void) => {
-          ["TOKEN_A", "TOKEN_B", "TOKEN_C"].forEach(fn);
-        },
-      };
-      mockSimulateTransaction.mockResolvedValue({ result: { retval: vec } });
-
-      await request(buildApp())
-        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
-        .expect(200);
-
-      expect(mockLoggerInfo).toHaveBeenCalledWith(
-        "Whitelisted tokens fetched successfully",
-        { contractId: VALID_CONTRACT, tokenCount: 3 }
-      );
-    });
-
-    it("logs error with contractId when retval is missing from result", async () => {
-      mockSimulateTransaction.mockResolvedValue({ result: {} });
-
-      await request(buildApp())
-        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
-        .expect(500);
-
-      expect(mockLoggerError).toHaveBeenCalledWith(
-        "Failed to fetch whitelisted tokens",
-        { contractId: VALID_CONTRACT, error: "Failed to get whitelisted tokens" }
-      );
-    });
-
-    it("logs error with contractId and error message when an exception is thrown", async () => {
-      mockSimulateTransaction.mockRejectedValue(new Error("Network exploded"));
-
-      await request(buildApp())
-        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
-        .expect(500);
-
-      expect(mockLoggerError).toHaveBeenCalledWith(
-        "Failed to fetch whitelisted tokens",
-        { contractId: VALID_CONTRACT, error: "Network exploded" }
-      );
-    });
-
-    it("log entries contain contractId in JSON-serializable format", async () => {
-      const vec = {
-        forEach: (fn: (item: unknown) => void) => {
-          ["TOKEN_X"].forEach(fn);
-        },
-      };
-      mockSimulateTransaction.mockResolvedValue({ result: { retval: vec } });
-
-      await request(buildApp())
-        .get(`/api/jobs/${VALID_CONTRACT}/whitelist`)
-        .expect(200);
-
-      const infoCalls = mockLoggerInfo.mock.calls as Array<[string, Record<string, unknown>]>;
-      const successCall = infoCalls.find(([msg]) => msg === "Whitelisted tokens fetched successfully");
-      expect(successCall).toBeDefined();
-      const [, meta] = successCall!;
-      expect(JSON.stringify(meta)).toBe(
-        JSON.stringify({ contractId: VALID_CONTRACT, tokenCount: 1 })
-      );
+      expect(Object.keys(res.body)).toEqual(["success", "error"]);
+      expect(res.body.success).toBe(false);
+      expect(typeof res.body.error).toBe("string");
     });
   });
 });

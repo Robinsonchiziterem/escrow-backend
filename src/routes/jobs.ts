@@ -170,26 +170,22 @@ router.get(
   async (req: Request, res: Response) => {
     const { contractId } = req.params;
 
-    logger.info("Fetching whitelisted tokens", { contractId });
-
-    const validation = validateContractId(contractId);
-    if (!validation.valid) {
-      logger.warn("Invalid contractId provided", { contractId });
-      sendError(res, 400, validation.error!);
-      return;
-    }
-
-    const requiredApiKey = process.env.API_KEY;
-    if (requiredApiKey) {
-      const providedKey = req.header("x-api-key");
-      if (providedKey !== requiredApiKey) {
-        logger.warn("Unauthorized request", { contractId });
-        sendError(res, 401, "Unauthorized");
+    try {
+      const validation = validateContractId(contractId);
+      if (!validation.valid) {
+        sendError(res, 400, validation.error!);
         return;
       }
-    }
 
-    try {
+      const requiredApiKey = process.env.API_KEY;
+      if (requiredApiKey) {
+        const providedKey = req.header("x-api-key");
+        if (providedKey !== requiredApiKey) {
+          sendError(res, 401, "Unauthorized");
+          return;
+        }
+      }
+
       const contract = new Contract(contractId as string);
       const account = await server.getAccount(process.env.DEPLOYER_ADDRESS || "");
       const tx = new TransactionBuilder(account, {
@@ -221,7 +217,7 @@ router.get(
           return;
         }
         logger.error("Failed to fetch whitelisted tokens", { contractId, error: errorMsg });
-        sendError(res, 500, errorMsg);
+        sendError(res, 500, "Internal server error");
         return;
       }
 
@@ -238,8 +234,8 @@ router.get(
         logger.info("Whitelisted tokens fetched successfully", { contractId, tokenCount: tokens.length });
         sendSuccess(res, { tokens });
       } else {
-        logger.error("Failed to fetch whitelisted tokens", { contractId, error: "Failed to get whitelisted tokens" });
-        sendError(res, 500, "Failed to get whitelisted tokens");
+        logger.error("Failed to fetch whitelisted tokens", { contractId, error: "unexpected empty retval" });
+        sendError(res, 500, "Internal server error");
       }
     } catch (err: any) {
       const message = err?.message ?? "Internal server error";
@@ -254,7 +250,7 @@ router.get(
         return;
       }
       logger.error("Failed to fetch whitelisted tokens", { contractId, error: message });
-      sendError(res, 500, message);
+      sendError(res, 500, "Internal server error");
     }
   }
 );
