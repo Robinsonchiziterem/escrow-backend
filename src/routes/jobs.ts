@@ -133,7 +133,7 @@ router.get(
         return;
       }
       logger.error("Failed to fetch job", { contractId, error: errorMsg });
-      sendError(res, 500, errorMsg);
+      sendError(res, 500, "Internal server error");
       return;
     }
 
@@ -148,7 +148,7 @@ router.get(
     sendSuccess(res, job);
   } catch (err: any) {
     const message = err?.message ?? "Internal server error";
-    if (/unauthorized|authentication|401/i.test(message)) {
+    if (/unauthorized|401/i.test(message)) {
       logger.error("Failed to fetch job", { contractId, error: message });
       sendError(res, 401, "Unauthorized");
       return;
@@ -159,7 +159,7 @@ router.get(
       return;
     }
     logger.error("Failed to fetch job", { contractId, error: message });
-    sendError(res, 500, message);
+    sendError(res, 500, "Internal server error");
   }
   }
 );
@@ -251,7 +251,7 @@ router.get(
       }
     } catch (err: any) {
       const message = err?.message ?? "Internal server error";
-      if (/unauthorized|authentication|401/i.test(message)) {
+      if (/unauthorized|401/i.test(message)) {
         logger.error("Failed to fetch whitelisted tokens", { contractId, error: message });
         sendError(res, 401, "Unauthorized");
         return;
