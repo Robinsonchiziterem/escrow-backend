@@ -20,7 +20,6 @@ import {
   jobContractSecurityHeaders,
 } from "../middleware/job-contract-security.js";
 import { sendError, sendSuccess } from "../utils/api-response.js";
-import { validateContractId } from "../utils/validation.js";
 import { validate } from "../middleware/validate.js";
 import { contractIdParamsSchema } from "../schemas/jobs.js";
 import { strictLimiter } from "../middleware/rateLimiter.js";
@@ -160,7 +159,7 @@ router.get(
         return;
       }
       logger.error("Failed to fetch job", { contractId, error: errorMsg });
-      sendError(res, 500, errorMsg);
+      sendError(res, 500, "Internal server error");
       return;
     }
 
@@ -175,7 +174,7 @@ router.get(
     sendSuccess(res, job);
   } catch (err: any) {
     const message = err?.message ?? "Internal server error";
-    if (/unauthorized|authentication|401/i.test(message)) {
+    if (/unauthorized|401/i.test(message)) {
       logger.error("Failed to fetch job", { contractId, error: message });
       sendError(res, 401, "Unauthorized");
       return;
@@ -186,7 +185,7 @@ router.get(
       return;
     }
     logger.error("Failed to fetch job", { contractId, error: message });
-    sendError(res, 500, message);
+    sendError(res, 500, "Internal server error");
   }
   }
 );
@@ -197,16 +196,13 @@ router.get(
   jobContractCors,
   jobContractSecurityHeaders,
   jobWhitelistRateLimit,
+  validate(contractIdParamsSchema, "params", (req) =>
+    logger.warn("Invalid contractId provided", { contractId: req.params.contractId }),
+  ),
   async (req: Request, res: Response) => {
     const contractId = req.params.contractId as string;
 
     try {
-      const validation = validateContractId(contractId);
-      if (!validation.valid) {
-        sendError(res, 400, validation.error!);
-        return;
-      }
-
       const requiredApiKey = process.env.API_KEY;
       if (requiredApiKey) {
         const providedKey = req.header("x-api-key");
@@ -278,7 +274,7 @@ router.get(
       }
     } catch (err: any) {
       const message = err?.message ?? "Internal server error";
-      if (/unauthorized|authentication|401/i.test(message)) {
+      if (/unauthorized|401/i.test(message)) {
         logger.error("Failed to fetch whitelisted tokens", { contractId, error: message });
         sendError(res, 401, "Unauthorized");
         return;
