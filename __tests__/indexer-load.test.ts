@@ -60,8 +60,10 @@ const EVENT_TYPES = [
 
 // Realistic-looking Stellar G-addresses (56 chars, starts with G)
 function makeAddress(n: number): string {
-  return ("G" + "A".repeat(54) + String(n)).slice(0, 56);
+  const suffix = String(n);
+  return "G" + "A".repeat(55 - suffix.length) + suffix;
 }
+
 
 // ─── fixture generation ───────────────────────────────────────────────────────
 
