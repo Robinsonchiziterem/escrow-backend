@@ -14,6 +14,7 @@ import { getJobsByWallet } from "../indexer/db.js";
 import {
   jobContractRateLimit,
   jobWhitelistRateLimit,
+  partialReleaseRateLimit,
 } from "../middleware/job-contract-rate-limit.js";
 import {
   jobContractCors,
@@ -321,6 +322,7 @@ router.post("/build-tx", strictLimiter, async (req: Request, res: Response) => {
 // POST /api/jobs/:contractId/milestones/:index/partial-release
 router.post(
   "/:contractId/milestones/:index/partial-release",
+  partialReleaseRateLimit,
   validate(partialReleaseParamsSchema, "params"),
   validate(partialReleaseBodySchema, "body"),
   async (req: Request, res: Response) => {
