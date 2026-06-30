@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isValidStellarContractId } from "../utils/stellar.js";
+import { isValidStellarContractId, isValidStellarAddress } from "../utils/stellar.js";
 
 export const contractIdParamsSchema = z.object({
   contractId: z
@@ -37,5 +37,7 @@ export const partialReleaseBodySchema = z.object({
     ),
   sourceAddress: z
     .string({ required_error: "sourceAddress is required" })
-    .min(1, { message: "sourceAddress is required" }),
+    .refine(isValidStellarAddress, {
+      message: "sourceAddress must be a valid Stellar account address (G...)",
+    }),
 });
