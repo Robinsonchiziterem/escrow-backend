@@ -21,7 +21,7 @@ import {
 } from "../middleware/job-contract-security.js";
 import { sendError, sendSuccess } from "../utils/api-response.js";
 import { validate } from "../middleware/validate.js";
-import { contractIdParamsSchema } from "../schemas/jobs.js";
+import { contractIdParamsSchema, whitelistParamsSchema } from "../schemas/jobs.js";
 import { strictLimiter } from "../middleware/rateLimiter.js";
 import logger from "../utils/logger.js";
 
@@ -169,8 +169,8 @@ router.get(
   jobContractCors,
   jobContractSecurityHeaders,
   jobWhitelistRateLimit,
-  validate(contractIdParamsSchema, "params", (req) =>
-    logger.warn("Invalid contractId provided", { contractId: req.params.contractId }),
+  validate(whitelistParamsSchema, "params", (req) =>
+    logger.warn("Invalid contractId on whitelist request", { contractId: req.params.contractId }),
   ),
   async (req: Request, res: Response) => {
     const contractId = req.params.contractId as string;
