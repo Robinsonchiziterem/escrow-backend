@@ -10,7 +10,7 @@ import {
 } from "@stellar/stellar-sdk";
 import { Server } from "@stellar/stellar-sdk/rpc";
 import NodeCache from "node-cache";
-import { getJobsByWallet } from "../indexer/db.js";
+import { getJobsByWallet, getEventsByContract } from "../indexer/db.js";
 import {
   jobContractRateLimit,
   jobWhitelistRateLimit,
@@ -20,7 +20,6 @@ import {
   jobContractSecurityHeaders,
 } from "../middleware/job-contract-security.js";
 import { sendError, sendSuccess } from "../utils/api-response.js";
-import { validateContractId } from "../utils/validation.js";
 import { validate } from "../middleware/validate.js";
 import { contractIdParamsSchema } from "../schemas/jobs.js";
 import { strictLimiter } from "../middleware/rateLimiter.js";
@@ -83,6 +82,33 @@ router.get("/by-wallet/:address", (req: Request, res: Response) => {
     }
 
     const result = getJobsByWallet(address, page, limit);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/jobs/:contractId/history - event timeline for a single job
+router.get("/:contractId/history", (req: Request, res: Response) => {
+  try {
+    const contractId = req.params.contractId as string;
+    const page = parseInt((req.query.page as string) || "1", 10);
+    const limit = parseInt((req.query.limit as string) || "10", 10);
+
+    if (!contractId || contractId.trim() === "") {
+      res.status(400).json({ success: false, error: "contractId is required" });
+      return;
+    }
+    if (isNaN(page) || page < 1) {
+      res.status(400).json({ success: false, error: "page must be a positive integer" });
+      return;
+    }
+    if (isNaN(limit) || limit < 1 || limit > 100) {
+      res.status(400).json({ success: false, error: "limit must be between 1 and 100" });
+      return;
+    }
+
+    const result = getEventsByContract(contractId, page, limit);
     res.json({ success: true, ...result });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -174,16 +200,13 @@ router.get(
   jobContractCors,
   jobContractSecurityHeaders,
   jobWhitelistRateLimit,
+  validate(contractIdParamsSchema, "params", (req) =>
+    logger.warn("Invalid contractId provided", { contractId: req.params.contractId }),
+  ),
   async (req: Request, res: Response) => {
     const contractId = req.params.contractId as string;
 
     try {
-      const validation = validateContractId(contractId);
-      if (!validation.valid) {
-        sendError(res, 400, validation.error!);
-        return;
-      }
-
       const requiredApiKey = process.env.API_KEY;
       if (requiredApiKey) {
         const providedKey = req.header("x-api-key");
