@@ -21,7 +21,7 @@ import {
 } from "../middleware/job-contract-security.js";
 import { sendError, sendSuccess } from "../utils/api-response.js";
 import { validate } from "../middleware/validate.js";
-import { contractIdParamsSchema } from "../schemas/jobs.js";
+import { contractIdParamsSchema, partialReleaseParamsSchema, partialReleaseBodySchema } from "../schemas/jobs.js";
 import { strictLimiter } from "../middleware/rateLimiter.js";
 import logger from "../utils/logger.js";
 
@@ -319,38 +319,38 @@ router.post("/build-tx", strictLimiter, async (req: Request, res: Response) => {
 });
 
 // POST /api/jobs/:contractId/milestones/:index/partial-release
-router.post("/:contractId/milestones/:index/partial-release", async (req: Request, res: Response) => {
-  try {
-    const { contractId, index } = req.params;
-    const { amount, sourceAddress } = req.body;
-    const contract = new Contract(contractId as string);
-    const account = await server.getAccount(sourceAddress as string);
+router.post(
+  "/:contractId/milestones/:index/partial-release",
+  validate(partialReleaseParamsSchema, "params"),
+  validate(partialReleaseBodySchema, "body"),
+  async (req: Request, res: Response) => {
+    try {
+      const { contractId, index } = req.params;
+      const { amount, sourceAddress } = req.body;
+      const contract = new Contract(contractId as string);
+      const account = await server.getAccount(sourceAddress as string);
+      const amountNum = BigInt(amount);
 
-    // Validate amount is a positive integer
-    const amountNum = BigInt(amount);
-    if (amountNum <= 0) {
-      return res.status(400).json({ success: false, error: "Amount must be a positive integer" });
+      const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(contract.call(
+          "approve_partial",
+          Address.fromString(sourceAddress).toScVal(),
+          nativeToScVal(parseInt(index as string), { type: "u32" }),
+          nativeToScVal(amountNum, { type: "i128" })
+        ))
+        .setTimeout(30)
+        .build();
+
+      const prepared = await server.prepareTransaction(tx);
+      res.json({ success: true, xdr: prepared.toXDR() });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
     }
-
-    const tx = new TransactionBuilder(account, {
-      fee: BASE_FEE,
-      networkPassphrase: Networks.TESTNET,
-    })
-      .addOperation(contract.call(
-        "approve_partial",
-        Address.fromString(sourceAddress).toScVal(),
-        nativeToScVal(parseInt(index as string), { type: "u32" }),
-        nativeToScVal(amountNum, { type: "i128" })
-      ))
-      .setTimeout(30)
-      .build();
-
-    const prepared = await server.prepareTransaction(tx);
-    res.json({ success: true, xdr: prepared.toXDR() });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
   }
-});
+);
 
 // GET /api/jobs/:contractId/milestones/:index/time-remaining
 router.get("/:contractId/milestones/:index/time-remaining", async (req: Request, res: Response) => {
