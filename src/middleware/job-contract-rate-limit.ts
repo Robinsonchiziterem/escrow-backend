@@ -68,8 +68,8 @@ function resolveWhitelistWindowMs(): number {
 }
 
 function resolveWhitelistMaxRequests(): number {
-  const configured = Number(process.env.JOB_WHITELIST_RATE_MAX ?? "30");
-  return Number.isFinite(configured) && configured > 0 ? configured : 30;
+  const configured = Number(process.env.JOB_WHITELIST_RATE_MAX ?? "20");
+  return Number.isFinite(configured) && configured > 0 ? configured : 20;
 }
 
 /** Dedicated rate limiter for GET /api/jobs/:contractId/whitelist. */
